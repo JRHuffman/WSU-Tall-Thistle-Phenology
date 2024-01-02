@@ -1,0 +1,293 @@
+---
+title: "R Notebook"
+output: html_notebook
+  theme: darkly
+---
+
+# Importing the Data
+
+```{r}
+library(readxl)
+Phen<- read_excel("ThistlePhenology Nov10 for R.xlsx")
+Phen$BlockID <- as.factor(Phen$BlockID)
+Phen$PlotID <- as.factor(Phen$PlotID)
+Phen$Headby7_12 <- as.factor(Phen$Headby7_12)
+Phen$FlrBy8_26 <- as.factor(Phen$FlrBy8_26)
+Phen$PostAnthBy8_28 <- as.factor(Phen$PostAnthBy8_28)
+Phen$X1CensFlrDuration <- as.factor(Phen$`1CensFlrDuration`)
+Phen$MaxFlrBy8_26 <- as.factor(Phen$MaxFlrBy8_26)
+str(Phen)
+```
+
+## Converting Plant Height to Standard Deviation
+
+Will help with convergence, everything is relative
+
+```{r}
+mnhgt<-mean(Phen$MaxPlantHgt)
+sdhgt<-sd(Phen$MaxPlantHgt)
+Phen$standhgt<-(Phen$MaxPlantHgt - mnhgt)/sdhgt
+str(Phen)
+```
+
+## Investigating how many Individuals in Each Level of Treatment
+
+```{r}
+tapply(Phen$Headby7_12,Phen$Fert,length)
+tapply(Phen$Headby7_12,Phen$Excl,length)
+```
+
+## Investigating how many Y/N in Each Level of Treatment
+
+```{r}
+tapply(Phen$Headby7_12,list(Phen$Fert,Phen$Headby7_12),length)
+tapply(Phen$Headby7_12,list(Phen$Excl,Phen$Headby7_12),length)
+```
+
+# GLMM Preparation
+
+First we want to separate exclusion data into insect exclusion Y/N:
+
+```{r}
+library(plyr)
+Phen1 <- Phen
+Phen1$InsPool <- revalue(Phen$Excl,c("CTL" = "InsPres", "Pseudo" = "InsPres", "TrnchCTL" = "InsPres", "AG" = "InsPres","IN" = "InsAbs", "AGIN" = "InsAbs", "AGINBG" = "InsAbs"))
+Phen1$AGPool <- revalue(Phen$Excl,c("CTL" = "AGPres", "Pseudo" = "AGPres", "TrnchCTL" = "AGPres", "IN" = "AGPres",
+                                     "AG" = "AGAbs", "AGIN" = "AGAbs", "AGINBG" = "AGAbs"))
+
+Phen1$AGPool <- as.factor(Phen1$AGPool)
+
+Phen1$InsPool <- as.factor(Phen1$InsPool)
+```
+
+Then we will examine how Y/N are distributed with ExclPool:
+
+```{r}
+tapply(Phen1$PostAnthBy8_28,Phen1$PostAnthBy8_28,length)
+```
+
+# GLMMs
+
+```{r}
+library(lme4)
+```
+
+## Headby7/12 - InsExcl
+
+We would theoretically like the most complex model incorporating both Exclusion and Fertilization but it will most likely not converge, so we will split it.
+
+```{r}
+ModelHdByIns<- glmer(Headby7_12~ standhgt +Fert + InsPool +(1|PlotID), data = Phen1, family = binomial,glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun=300000)))
+summary(ModelHdByIns)
+drop1(ModelHdByIns, test = "Chi")
+```
+
+```{r}
+
+ModelHdByInsN<- glmer(Headby7_12~Fert + InsPool +(1|PlotID), data = Phen1, family = binomial,glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun=300000)))
+summary(ModelHdByInsN)
+drop1(ModelHdByInsN, test = "Chi")
+```
+
+------------------------------------------------------------------------
+
+## FlrBy8/26 - InsExcl
+
+Was able to obtain the most complex model by removing BlockID as a random effect:
+
+```{r}
+ModelFlrByIns<- glmer(FlrBy8_26 ~ InsPool + Fert + standhgt + (1|PlotID), data = Phen1, family = binomial,glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun=300000)))
+summary(ModelFlrByIns)
+drop1(ModelFlrByIns, test = "Chi")
+```
+
+```{r}
+ModelFlrByInsN<- glmer(FlrBy8_26 ~ InsPool + Fert + (1|PlotID), data = Phen1, family = binomial,glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun=300000)))
+summary(ModelFlrByInsN)
+drop1(ModelFlrByInsN, test = "Chi")
+```
+
+------------------------------------------------------------------------
+
+## PostAnthBy 8/28 - InsExcl
+
+Was able to obtain the most complex model by removing BlockID as a random effect:
+
+```{r}
+ModelPostAnthByIns<- glmer(PostAnthBy8_28 ~ InsPool + Fert + standhgt + (1|PlotID), data = Phen1, family = binomial,glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun=300000)))
+summary(ModelPostAnthByIns)
+drop1(ModelPostAnthByIns, test = "Chi")
+```
+
+```{r}
+ModelPostAnthByInsN<- glmer(PostAnthBy8_28 ~ InsPool + Fert + (1|PlotID), data = Phen1, family = binomial,glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun=300000)))
+summary(ModelPostAnthByInsN)
+drop1(ModelPostAnthByInsN, test = "Chi")
+```
+
+------------------------------------------------------------------------
+
+## 1 Census Duration - InsExcl
+
+There was no model that fit the duration under 1 Census Duration.
+
+```{r}
+ModelDurIns<- glm(X1CensFlrDuration ~ InsPool + Fert + standhgt , data = Phen1, family = binomial)
+summary(ModelDurIns)
+drop1(ModelDurIns, test = "Chi")
+```
+
+```{r}
+ModelDurInsN<- glm(X1CensFlrDuration ~ InsPool + Fert, data = Phen1, family = binomial)
+summary(ModelDurInsN)
+drop1(ModelDurInsN, test = "Chi")
+```
+
+------------------------------------------------------------------------
+
+## MaxHdsFlr - InsExcl
+
+I removed all values that had NA as it means nothing if they do not ever have flowering heads.
+
+```{r}
+Phen2 <- subset(Phen1, MaxFlrBy8_26!='NA')
+```
+
+```{r}
+ModelMaxFlrIns<- glm(MaxFlrBy8_26 ~ standhgt + Fert +InsPool, data = Phen2, family = binomial)
+summary(ModelMaxFlrIns)
+drop1(ModelMaxFlrIns, test = "Chi")
+```
+
+```{r}
+ModelMaxFlrInsN<- glm(MaxFlrBy8_26 ~ Fert +InsPool, data = Phen2, family = binomial)
+summary(ModelMaxFlrInsN)
+drop1(ModelMaxFlrInsN, test = "Chi")
+```
+
+------------------------------------------------------------------------
+
+# GLMM AgExcl
+
+## Headby7/12 - AgExcl
+
+```{r}
+ModelHdByAg<- glmer(Headby7_12~ standhgt +Fert + AGPool +(1|PlotID), data = Phen1, family = binomial,glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun=300000)))
+summary(ModelHdByAg)
+drop1(ModelHdByAg, test = "Chi")
+```
+
+```{r}
+ModelHdByAgN<- glmer(Headby7_12~ Fert + AGPool +(1|PlotID), data = Phen1, family = binomial,glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun=300000)))
+summary(ModelHdByAgN)
+drop1(ModelHdByAgN, test = "Chi")
+```
+
+## FlrBy8/26 - AgExcl
+
+```{r}
+ModelFlrByAg<- glmer(FlrBy8_26 ~ standhgt + AGPool + (1|PlotID), data = Phen1, family = binomial,glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun=300000)))
+summary(ModelFlrByAg)
+drop1(ModelFlrByAg, test = "Chi")
+```
+
+```{r}
+ModelFlrByAg1<- glmer(FlrBy8_26 ~ Fert + AGPool + (1|PlotID), data = Phen1, family = binomial,glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun=300000)))
+summary(ModelFlrByAg1)
+drop1(ModelFlrByAg1, test = "Chi")
+```
+
+## PostAnthBy8/28 - AgExcl
+
+```{r}
+ModelPostAnthByAg<- glmer(PostAnthBy8_28 ~ AGPool + Fert + standhgt + (1|PlotID), data = Phen1, family = binomial,glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun=300000)))
+summary(ModelPostAnthByAg)
+drop1(ModelPostAnthByAg, test = "Chi")
+```
+
+```{r}
+ModelPostAnthByAgN<- glmer(PostAnthBy8_28 ~ AGPool + Fert + (1|PlotID), data = Phen1, family = binomial,glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun=300000)))
+summary(ModelPostAnthByAgN)
+drop1(ModelPostAnthByAgN, test = "Chi")
+```
+
+## 1CensDur - AgExcl
+
+```{r}
+ModelDurAg<- glm(X1CensFlrDuration ~ AGPool + Fert + standhgt, data = Phen1, family = binomial)
+summary(ModelDurAg)
+drop1(ModelDurAg, test = "Chi")
+```
+
+```{r}
+ModelDurAgN<- glm(X1CensFlrDuration ~ AGPool + Fert, data = Phen1, family = binomial)
+summary(ModelDurAgN)
+drop1(ModelDurAgN, test = "Chi")
+```
+
+## MaxHdsFlr - AgExcl
+
+```{r}
+ModelMaxFlrAg<- glm(MaxFlrBy8_26 ~ standhgt + Fert + AGPool, data = Phen2, family = binomial)
+summary(ModelMaxFlrAg)
+drop1(ModelMaxFlrAg, test = "Chi")
+```
+
+```{r}
+ModelMaxFlrAgN<- glm(MaxFlrBy8_26 ~ Fert + AGPool, data = Phen2, family = binomial)
+summary(ModelMaxFlrAgN)
+drop1(ModelMaxFlrAgN, test = "Chi")
+```
+
+------------------------------------------------------------------------
+
+# Visualization
+
+```{r}
+library(ggplot2)
+#Head by 7/12
+InsHdBy <- as.data.frame(table(Phen1$InsPool,Phen1$Headby7_12))
+InsHdBy <- setNames(InsHdBy,c("InsPool","Headby7_12","Freq"))
+ggplot(InsHdBy, aes(x=InsPool, y=Freq, fill=Headby7_12))+
+  geom_bar(stat="identity", position=position_dodge())+
+  labs(title="Insect Exclusion on the Proportion of Any Head by July 12th")
+
+#PostAnthBy 8/28
+InsPostAnthBy <- as.data.frame(table(Phen1$InsPool,Phen1$PostAnthBy8_28))
+InsPostAnthBy <- setNames(InsPostAnthBy,c("InsPool","PostAnthBy8_28","Freq"))
+ggplot(InsPostAnthBy, aes(x=InsPool, y=Freq, fill=PostAnthBy8_28))+
+  geom_bar(stat="identity", position=position_dodge())+
+  labs(title="Insect Exclusion on the Proportion of Post Anthesis Heads by August 28th")
+
+```
+
+```{r}
+ggplot(Phen1, aes(x=MaxPlantHgt, y=Headby7_12, color=Headby7_12))+
+  geom_point()+
+  stat_summary(fun="mean", geom="point", col="black")
+
+ggplot(Phen1, aes(x=MaxPlantHgt, y=FlrBy8_26, color=FlrBy8_26))+
+  geom_point()+
+  stat_summary(fun="mean", geom="point", col="black")
+
+ggplot(Phen1, aes(x=MaxPlantHgt, y=PostAnthBy8_28, color=PostAnthBy8_28))+
+  geom_point()+
+  stat_summary(fun="mean", geom="point", col="black")
+```
+
+```{r}
+ModelPlantHgt<- lmer(MaxPlantHgt~Fert + InsPool +(1|PlotID), data = Phen1)
+summary(ModelPlantHgt)
+drop1(ModelPlantHgt, test = "Chi")
+
+
+
+tapply(Phen1$MaxPlantHgt, Phen1$InsPool, mean)
+tapply(Phen1$MaxPlantHgt, Phen1$InsPool, var)
+qqnorm(resid(ModelPlantHgt))
+
+tapply(Phen1$MaxPlantHgt, Phen1$Fert, mean)
+tapply(Phen1$MaxPlantHgt, Phen1$Fert, var)
+```
+
+
